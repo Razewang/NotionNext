@@ -9,7 +9,53 @@ import BLOG from './blog.config'
  */
 export const config = {
   // 这里设置白名单，防止静态资源被拦截
-  matcher: ['/((?!.*\\..*|_next|/sign-in|/auth).*)', '/', '/(api|trpc)(.*)']
+  matcher: [
+    '/((?!.*\\..*|_next|/sign-in|/auth).*)',
+    '/',
+    '/(api|trpc)(.*)',
+    // WordPress 扫描器经常请求带扩展名的路径；显式纳入 middleware，
+    // 让它们在进入动态 Notion 路由前直接返回 404。
+    '/wp-admin/:path*',
+    '/:locale/wp-admin/:path*',
+    '/wp-login.php',
+    '/:locale/wp-login.php',
+    '/xmlrpc.php',
+    '/:locale/xmlrpc.php',
+    '/wp-json/:path*',
+    '/:locale/wp-json/:path*',
+    '/wp-content/:path*',
+    '/:locale/wp-content/:path*',
+    '/wp-includes/:path*',
+    '/:locale/wp-includes/:path*',
+    '/((?!_next|sign-in|auth).*\\.php.*)'
+  ]
+}
+
+const blockedProbePath = (pathname: string): boolean => {
+  const normalizedPath = String(pathname || '').replace(/\/{2,}/g, '/')
+  return (
+    /\/(?:wp-admin|wp-json|wp-content|wp-includes)(?:\/|$)/i.test(
+      normalizedPath
+    ) ||
+    /\/(?:wp-login|xmlrpc)\.php(?:\/|$)/i.test(normalizedPath) ||
+    /\.php(?:\/|$)/i.test(normalizedPath)
+  )
+}
+
+const rejectBlockedProbe = (req: NextRequest): NextResponse | null => {
+  if (!blockedProbePath(req.nextUrl.pathname)) {
+    return null
+  }
+
+  return new NextResponse('Not Found', {
+    status: 404,
+    headers: {
+      'Cache-Control':
+        'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400',
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Robots-Tag': 'noindex'
+    }
+  })
 }
 
 // 限制登录访问的路由
@@ -34,6 +80,11 @@ const isTenantAdminRoute = createRouteMatcher([
  */
 // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
 const noAuthMiddleware = async (req: NextRequest, ev: any) => {
+  const blockedResponse = rejectBlockedProbe(req)
+  if (blockedResponse) {
+    return blockedResponse
+  }
+
   // 如果没有配置 Clerk 相关环境变量，返回一个默认响应或者继续处理请求
   if (BLOG['UUID_REDIRECT']) {
     let redirectJson: Record<string, string> = {}
@@ -65,6 +116,11 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
  */
 const authMiddleware = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
   ? clerkMiddleware((auth, req) => {
+      const blockedResponse = rejectBlockedProbe(req)
+      if (blockedResponse) {
+        return blockedResponse
+      }
+
       const { userId } = auth()
       // 处理 /dashboard 路由的登录保护
       if (isTenantRoute(req)) {

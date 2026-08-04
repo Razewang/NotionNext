@@ -49,7 +49,7 @@ A static blog system built with NextJS and Notion API, deployed on Vercel. Desig
 ## 3-Minute Quick Start
 
 ```bash
-# 1) Use Node 20 (nvm recommended)
+# 1) Use Node 22 (nvm recommended)
 nvm use || nvm install
 
 # 2) Install Yarn if needed
