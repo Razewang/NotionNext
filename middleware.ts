@@ -90,6 +90,11 @@ const getBlockedResponse = (req: NextRequest): NextResponse | null => {
   return null
 }
 
+const isPotentialUuidRedirectPath = (pathname: string): boolean => {
+  const lastPart = getLastPartOfUrl(pathname) as string
+  return checkStrIsNotionId(lastPart)
+}
+
 const getHeadResponse = (req: NextRequest): NextResponse | null => {
   const { pathname } = req.nextUrl
 
@@ -132,6 +137,11 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
     return blockedResponse
   }
 
+  const headResponse = getHeadResponse(req)
+  if (headResponse && !isPotentialUuidRedirectPath(req.nextUrl.pathname)) {
+    return headResponse
+  }
+
   // 如果没有配置 Clerk 相关环境变量，返回一个默认响应或者继续处理请求
   if (BLOG['UUID_REDIRECT']) {
     let redirectJson: Record<string, string> = {}
@@ -156,7 +166,7 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
       return NextResponse.redirect(redirectToUrl, 308)
     }
   }
-  const headResponse = getHeadResponse(req)
+
   if (headResponse) {
     return headResponse
   }
