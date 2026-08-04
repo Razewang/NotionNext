@@ -47,7 +47,7 @@ const NoFound = props => {
   return <DynamicLayout theme={theme} layoutName='Layout404' {...props} />
 }
 
-export async function getStaticProps() {
+export function getStaticProps() {
   return { props: STATIC_404_PROPS }
 }
 
