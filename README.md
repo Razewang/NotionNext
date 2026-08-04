@@ -94,10 +94,10 @@ NotionNext 是一个基于 **Next.js + Notion API** 的开源站点系统。你�
 
 ## 本地开发
 
-推荐使用 Node 20 和 Yarn 1。
+推荐使用 Node 22 和 Yarn 1。
 
 ```bash
-# 1. 使用 Node 20
+# 1. 使用 Node 22
 nvm use || nvm install
 
 # 2. 安装 Yarn
