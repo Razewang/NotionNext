@@ -80,12 +80,18 @@ const shouldHandleHeadInApplication = (pathname: string): boolean => {
   )
 }
 
-const getEarlyResponse = (req: NextRequest): NextResponse | null => {
+const getBlockedResponse = (req: NextRequest): NextResponse | null => {
   const { pathname } = req.nextUrl
 
   if (blockedProbePath(pathname) || containsDynamicRoutePlaceholder(pathname)) {
     return notFoundResponse()
   }
+
+  return null
+}
+
+const getHeadResponse = (req: NextRequest): NextResponse | null => {
+  const { pathname } = req.nextUrl
 
   if (req.method === 'HEAD' && !shouldHandleHeadInApplication(pathname)) {
     return new NextResponse(null, {
@@ -121,9 +127,9 @@ const isTenantAdminRoute = createRouteMatcher([
  */
 // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
 const noAuthMiddleware = async (req: NextRequest, ev: any) => {
-  const earlyResponse = getEarlyResponse(req)
-  if (earlyResponse) {
-    return earlyResponse
+  const blockedResponse = getBlockedResponse(req)
+  if (blockedResponse) {
+    return blockedResponse
   }
 
   // 如果没有配置 Clerk 相关环境变量，返回一个默认响应或者继续处理请求
@@ -150,6 +156,11 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
       return NextResponse.redirect(redirectToUrl, 308)
     }
   }
+  const headResponse = getHeadResponse(req)
+  if (headResponse) {
+    return headResponse
+  }
+
   return NextResponse.next()
 }
 /**
@@ -157,9 +168,14 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
  */
 const authMiddleware = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
   ? clerkMiddleware((auth, req) => {
-      const earlyResponse = getEarlyResponse(req)
-      if (earlyResponse) {
-        return earlyResponse
+      const blockedResponse = getBlockedResponse(req)
+      if (blockedResponse) {
+        return blockedResponse
+      }
+
+      const headResponse = getHeadResponse(req)
+      if (headResponse) {
+        return headResponse
       }
 
       const { userId } = auth()
