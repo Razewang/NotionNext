@@ -27,7 +27,9 @@ export const config = {
     '/:locale/wp-content/:path*',
     '/wp-includes/:path*',
     '/:locale/wp-includes/:path*',
-    '/((?!_next|sign-in|auth).*\\.php.*)'
+    '/((?!_next|sign-in|auth).*\\.php.*)',
+    // Catch-all 占位符（如 [...slug]）包含点号，不会命中上面的通用 matcher。
+    '/((?!_next|sign-in|auth).*\\[.*\\].*)'
   ]
 }
 
@@ -42,12 +44,25 @@ const blockedProbePath = (pathname: string): boolean => {
   )
 }
 
-const rejectBlockedProbe = (req: NextRequest): NextResponse | null => {
-  if (!blockedProbePath(req.nextUrl.pathname)) {
-    return null
+const containsDynamicRoutePlaceholder = (pathname: string): boolean => {
+  let decodedPathname = pathname
+  try {
+    decodedPathname = decodeURIComponent(pathname)
+  } catch {
+    // 保留原始路径；格式错误的转义字符不应让 middleware 本身抛出异常。
   }
 
-  return new NextResponse('Not Found', {
+  return decodedPathname
+    .split('/')
+    .some(segment =>
+      /^(?:\[(?:\.\.\.)?[^\[\]/]+\]|\[\[(?:\.\.\.)?[^\[\]/]+\]\])$/.test(
+        segment
+      )
+    )
+}
+
+const notFoundResponse = (): NextResponse =>
+  new NextResponse('Not Found', {
     status: 404,
     headers: {
       'Cache-Control':
@@ -56,6 +71,43 @@ const rejectBlockedProbe = (req: NextRequest): NextResponse | null => {
       'X-Robots-Tag': 'noindex'
     }
   })
+
+const shouldHandleHeadInApplication = (pathname: string): boolean => {
+  const normalizedPath = String(pathname || '').replace(/\/{2,}/g, '/')
+  // 同时识别带 locale 前缀的受保护路由，避免绕过 API 或鉴权逻辑。
+  return /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:api|trpc|dashboard|admin|user)(?:\/|$)/i.test(
+    normalizedPath
+  )
+}
+
+const getBlockedResponse = (req: NextRequest): NextResponse | null => {
+  const { pathname } = req.nextUrl
+
+  if (blockedProbePath(pathname) || containsDynamicRoutePlaceholder(pathname)) {
+    return notFoundResponse()
+  }
+
+  return null
+}
+
+const isPotentialUuidRedirectPath = (pathname: string): boolean => {
+  const lastPart = getLastPartOfUrl(pathname) as string
+  return checkStrIsNotionId(lastPart)
+}
+
+const getHeadResponse = (req: NextRequest): NextResponse | null => {
+  const { pathname } = req.nextUrl
+
+  if (req.method === 'HEAD' && !shouldHandleHeadInApplication(pathname)) {
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Cache-Control': 'public, max-age=0, s-maxage=3600'
+      }
+    })
+  }
+
+  return null
 }
 
 // 限制登录访问的路由
@@ -80,9 +132,14 @@ const isTenantAdminRoute = createRouteMatcher([
  */
 // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
 const noAuthMiddleware = async (req: NextRequest, ev: any) => {
-  const blockedResponse = rejectBlockedProbe(req)
+  const blockedResponse = getBlockedResponse(req)
   if (blockedResponse) {
     return blockedResponse
+  }
+
+  const headResponse = getHeadResponse(req)
+  if (headResponse && !isPotentialUuidRedirectPath(req.nextUrl.pathname)) {
+    return headResponse
   }
 
   // 如果没有配置 Clerk 相关环境变量，返回一个默认响应或者继续处理请求
@@ -109,6 +166,11 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
       return NextResponse.redirect(redirectToUrl, 308)
     }
   }
+
+  if (headResponse) {
+    return headResponse
+  }
+
   return NextResponse.next()
 }
 /**
@@ -116,9 +178,14 @@ const noAuthMiddleware = async (req: NextRequest, ev: any) => {
  */
 const authMiddleware = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
   ? clerkMiddleware((auth, req) => {
-      const blockedResponse = rejectBlockedProbe(req)
+      const blockedResponse = getBlockedResponse(req)
       if (blockedResponse) {
         return blockedResponse
+      }
+
+      const headResponse = getHeadResponse(req)
+      if (headResponse) {
+        return headResponse
       }
 
       const { userId } = auth()
